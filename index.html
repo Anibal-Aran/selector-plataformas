@@ -1,0 +1,1906 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Selector de Plataformas Xtracut</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        }
+        
+        .gradient-green {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        }
+        
+        .gradient-blue {
+            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+        }
+        
+        .gradient-yellow {
+            background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+        }
+        
+        .hover-lift {
+            transition: all 0.2s ease;
+        }
+        
+        .hover-lift:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+        }
+        
+        .progress-bar {
+            transition: width 0.3s ease;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .animate-spin {
+            animation: spin 1s linear infinite;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useMemo, useEffect } = React;
+
+        // Datos de plataformas (base de datos en memoria)
+        const PLATAFORMAS_DATA = PLATAFORMAS_JSON_DATA;
+
+        // Orden de marcas según especificaciones
+        const ORDEN_MARCAS = [
+            "John Deere", 
+            "Case", 
+            "Vassalli", 
+            "New Holland", 
+            "Schumacher", 
+            "MacDon", 
+            "CLAAS", 
+            "Don Roque", 
+            "Otros"
+        ];
+
+        // Email de destino para ingeniería
+        const EMAIL_INGENIERIA = 'ingenieria@aransa.com.ar';
+
+        // Componente principal
+        function App() {
+            const [paso, setPaso] = useState(0);
+            const [datosCliente, setDatosCliente] = useState({ razonSocial: '', email: '' });
+            const [seleccion, setSeleccion] = useState({
+                marca: null,
+                mando: null,
+                tipoSeccion: null,
+                largo: null,
+                modelo: null
+            });
+            const [configuracion, setConfiguracion] = useState({
+                cantidad: 1,
+                tipoDiente: '',
+                reforzada: false,
+                comentarios: ''
+            });
+            const [carrito, setCarrito] = useState([]);
+            const [enviando, setEnviando] = useState(false);
+            const [enviado, setEnviado] = useState(false);
+            const [itemEditando, setItemEditando] = useState(null);
+
+            // Filtrar opciones disponibles según selección actual
+            const opcionesDisponibles = useMemo(() => {
+                let datos = PLATAFORMAS_DATA;
+
+                if (seleccion.marca && seleccion.marca !== 'Otros') {
+                    datos = datos.filter(p => p.marca === seleccion.marca);
+                }
+                if (seleccion.mando) {
+                    datos = datos.filter(p => p.mando === seleccion.mando);
+                }
+                if (seleccion.tipoSeccion) {
+                    datos = datos.filter(p => p.tipoSeccion === seleccion.tipoSeccion);
+                }
+                if (seleccion.largo) {
+                    datos = datos.filter(p => p.largo === seleccion.largo);
+                }
+
+                return {
+                    marcas: [...new Set(PLATAFORMAS_DATA.map(p => p.marca))].sort((a, b) => {
+                        const indexA = ORDEN_MARCAS.indexOf(a);
+                        const indexB = ORDEN_MARCAS.indexOf(b);
+                        return (indexA === -1 ? 999 : indexA) - (indexB === -1 ? 999 : indexB);
+                    }),
+                    mandos: [...new Set(datos.map(p => p.mando))].sort(),
+                    tiposSeccion: [...new Set(datos.map(p => p.tipoSeccion))].sort(),
+                    largos: [...new Set(datos.map(p => p.largo))].sort((a, b) => {
+                        const numA = parseInt(a);
+                        const numB = parseInt(b);
+                        return numA - numB;
+                    }),
+                    modelos: [...new Set(datos.map(p => p.modelo))].sort()
+                };
+            }, [seleccion]);
+
+            // Plataforma seleccionada final
+            const plataformaSeleccionada = useMemo(() => {
+                if (!seleccion.marca || seleccion.marca === 'Otros') return null;
+                
+                let resultado = PLATAFORMAS_DATA.filter(p => 
+                    p.marca === seleccion.marca &&
+                    p.mando === seleccion.mando &&
+                    p.tipoSeccion === seleccion.tipoSeccion &&
+                    p.largo === seleccion.largo
+                );
+
+                if (resultado.length === 1) {
+                    return resultado[0];
+                } else if (resultado.length > 1 && seleccion.modelo) {
+                    return resultado.find(p => String(p.modelo) === String(seleccion.modelo));
+                }
+
+                return null;
+            }, [seleccion]);
+
+            // Auto-skip cuando solo hay una opción (para todos los pasos)
+            useEffect(() => {
+                // Auto-skip para Mando (Paso 2)
+                if (paso === 2 && opcionesDisponibles.mandos.length === 1) {
+                    setSeleccion(prev => ({ ...prev, mando: opcionesDisponibles.mandos[0] }));
+                    setPaso(3);
+                }
+                
+                // Auto-skip para Tipo de Sección (Paso 3)
+                if (paso === 3 && opcionesDisponibles.tiposSeccion.length === 1) {
+                    setSeleccion(prev => ({ ...prev, tipoSeccion: opcionesDisponibles.tiposSeccion[0] }));
+                    setPaso(4);
+                }
+                
+                // Auto-skip para Largo (Paso 4)
+                if (paso === 4 && opcionesDisponibles.largos.length === 1) {
+                    const largo = opcionesDisponibles.largos[0];
+                    setSeleccion(prev => ({ ...prev, largo }));
+                    
+                    // Verificar si hay múltiples modelos
+                    const modelosDisponibles = PLATAFORMAS_DATA.filter(p =>
+                        p.marca === seleccion.marca &&
+                        p.mando === seleccion.mando &&
+                        p.tipoSeccion === seleccion.tipoSeccion &&
+                        p.largo === largo
+                    );
+                    
+                    if (modelosDisponibles.length > 1) {
+                        setPaso(5);
+                    } else {
+                        setPaso(6);
+                    }
+                }
+                
+                // Auto-skip para Modelo (Paso 5)
+                if (paso === 5 && opcionesDisponibles.modelos.length === 1) {
+                    setSeleccion(prev => ({ ...prev, modelo: opcionesDisponibles.modelos[0] }));
+                    setPaso(6);
+                }
+            }, [paso, opcionesDisponibles, seleccion.marca, seleccion.mando, seleccion.tipoSeccion]);
+
+            // Calcular resistencia total de la opción reforzada
+            const calcularResistenciaReforzada = (plataforma) => {
+                if (!plataforma) return 0;
+                let total = 0;
+                if (plataforma.cambio22 === 'si') total += 29;
+                if (plataforma.refSup === 'si') total += 6;
+                if (plataforma.refInf === 'si') total += 6;
+                return total;
+            };
+
+            // Agregar al carrito
+            const agregarAlCarrito = () => {
+                const item = {
+                    id: itemEditando !== null ? itemEditando.id : Date.now(),
+                    marca: seleccion.marca,
+                    modelo: seleccion.marca === 'Otros' ? 'Plataforma no listada' : plataformaSeleccionada?.modelo,
+                    mando: seleccion.mando,
+                    tipoSeccion: seleccion.tipoSeccion,
+                    largo: seleccion.largo,
+                    varilla: plataformaSeleccionada?.varilla || 'N/A',
+                    cantidad: configuracion.cantidad,
+                    tipoDiente: configuracion.tipoDiente,
+                    reforzada: configuracion.reforzada,
+                    comentarios: configuracion.comentarios,
+                    resistenciaTotal: configuracion.reforzada ? calcularResistenciaReforzada(plataformaSeleccionada) : 0,
+                    detallesReforzada: plataformaSeleccionada && configuracion.reforzada ? {
+                        varilla22: plataformaSeleccionada.cambio22 === 'si',
+                        refSup: plataformaSeleccionada.refSup === 'si',
+                        refInf: plataformaSeleccionada.refInf === 'si'
+                    } : null
+                };
+
+                if (itemEditando !== null) {
+                    setCarrito(carrito.map(i => i.id === itemEditando.id ? item : i));
+                    setItemEditando(null);
+                } else {
+                    setCarrito([...carrito, item]);
+                }
+
+                // Resetear para agregar otra plataforma
+                resetearSeleccion();
+                setPaso(1);
+            };
+
+            const editarItem = (item) => {
+                setItemEditando(item);
+                setSeleccion({
+                    marca: item.marca,
+                    mando: item.mando,
+                    tipoSeccion: item.tipoSeccion,
+                    largo: item.largo,
+                    modelo: item.modelo
+                });
+                setConfiguracion({
+                    cantidad: item.cantidad,
+                    tipoDiente: item.tipoDiente,
+                    reforzada: item.reforzada,
+                    comentarios: item.comentarios
+                });
+                setPaso(6);
+            };
+
+            const eliminarItem = (id) => {
+                setCarrito(carrito.filter(i => i.id !== id));
+            };
+
+            const resetearSeleccion = () => {
+                setSeleccion({ marca: null, mando: null, tipoSeccion: null, largo: null, modelo: null });
+                setConfiguracion({ cantidad: 1, tipoDiente: '', reforzada: false, comentarios: '' });
+            };
+
+            const volver = () => {
+                if (paso > 1) {
+                    setPaso(paso - 1);
+                    // Limpiar selecciones posteriores
+                    if (paso === 2) setSeleccion({ ...seleccion, mando: null, tipoSeccion: null, largo: null, modelo: null });
+                    if (paso === 3) setSeleccion({ ...seleccion, tipoSeccion: null, largo: null, modelo: null });
+                    if (paso === 4) setSeleccion({ ...seleccion, largo: null, modelo: null });
+                    if (paso === 5) setSeleccion({ ...seleccion, modelo: null });
+                }
+            };
+
+            const enviarPedido = async () => {
+                setEnviando(true);
+                
+                try {
+                    // ============================================
+                    // 🔧 CONFIGURACIÓN DE EMAILJS
+                    // ============================================
+                    // ✅ CREDENCIALES CONFIGURADAS
+                    const EMAILJS_SERVICE_ID = 'service_vjsp58b';      // Service ID de EmailJS
+                    const EMAILJS_TEMPLATE_ID = 'template_ol85vlt';    // Template ID de EmailJS
+                    const EMAILJS_PUBLIC_KEY = 'OhXjd0n1yx3pVrQyN';     // Public Key de EmailJS
+                    // ============================================
+
+                    // Preparar datos para EmailJS
+                    const itemsFormateados = carrito.map((item, index) => ({
+                        numero: index + 1,
+                        marca: item.marca,
+                        modelo: item.modelo,
+                        mando: item.mando,
+                        tipo_seccion: item.tipoSeccion,
+                        largo: item.largo,
+                        varilla: item.varilla,
+                        tipo_diente: item.tipoDiente,
+                        cantidad: item.cantidad,
+                        plural: item.cantidad > 1,
+                        reforzada: item.reforzada,
+                        resistencia_total: item.resistenciaTotal,
+                        varilla22: item.detallesReforzada?.varilla22 || false,
+                        ref_sup: item.detallesReforzada?.refSup || false,
+                        ref_inf: item.detallesReforzada?.refInf || false,
+                        comentarios: item.comentarios
+                    }));
+
+                    // Crear versión texto para emails que no soportan HTML
+                    const itemsTexto = carrito.map((item, index) => {
+                        let texto = `${index + 1}. ${item.marca} - ${item.modelo}\n`;
+                        texto += `   - Mando: ${item.mando}\n`;
+                        texto += `   - Tipo de sección: ${item.tipoSeccion}\n`;
+                        texto += `   - Largo: ${item.largo}\n`;
+                        texto += `   - Varilla original: ${item.varilla}\n`;
+                        texto += `   - Tipo de diente: ${item.tipoDiente}\n`;
+                        texto += `   - Cantidad: ${item.cantidad}\n`;
+                        
+                        if (item.reforzada) {
+                            texto += `   - OPCIÓN REFORZADA PREMIUM (+${item.resistenciaTotal}% resistencia)\n`;
+                            if (item.detallesReforzada?.varilla22) texto += `     • Varilla 22mm (+29%)\n`;
+                            if (item.detallesReforzada?.refSup) texto += `     • Refuerzo Superior (+6%)\n`;
+                            if (item.detallesReforzada?.refInf) texto += `     • Refuerzo Inferior (+6%)\n`;
+                        }
+                        
+                        if (item.comentarios) {
+                            texto += `   - Comentarios: ${item.comentarios}\n`;
+                        }
+                        
+                        return texto;
+                    }).join('\n');
+
+                    const totalUnidades = carrito.reduce((sum, item) => sum + item.cantidad, 0);
+                    const totalReforzadas = carrito.filter(item => item.reforzada).length;
+
+                    // Parámetros para el template de EmailJS
+                    const templateParams = {
+                        cliente_razon_social: datosCliente.razonSocial,
+                        cliente_email: datosCliente.email,
+                        reply_to: datosCliente.email, // Para que puedan responder al cliente
+                        to_email: EMAIL_INGENIERIA, // Email principal de destino
+                        to_name: 'Ingeniería Aransa', // Nombre del destinatario
+                        fecha_pedido: new Date().toLocaleString('es-AR', {
+                            dateStyle: 'full',
+                            timeStyle: 'short'
+                        }),
+                        items: itemsFormateados,
+                        items_texto: itemsTexto,
+                        total_items: carrito.length,
+                        total_unidades: totalUnidades,
+                        total_reforzadas: totalReforzadas
+                    };
+
+                    // Enviar email usando EmailJS
+                    await emailjs.send(
+                        EMAILJS_SERVICE_ID,
+                        EMAILJS_TEMPLATE_ID,
+                        templateParams,
+                        EMAILJS_PUBLIC_KEY
+                    );
+
+                    console.log('✅ Pedido enviado exitosamente');
+                    setEnviando(false);
+                    setEnviado(true);
+
+                } catch (error) {
+                    console.error('❌ Error al enviar pedido:', error);
+                    alert('Error al enviar el pedido. Por favor, verifica tu conexión e intenta nuevamente.\n\nDetalles: ' + (error.text || error.message));
+                    setEnviando(false);
+                }
+            };
+
+            const nuevoPedido = () => {
+                setEnviado(false);
+                setCarrito([]);
+                setDatosCliente({ razonSocial: '', email: '' });
+                resetearSeleccion();
+                setPaso(0);
+            };
+
+            // Renderizado según el paso
+            if (enviado) {
+                return <PantallaConfirmacion onNuevoPedido={nuevoPedido} />;
+            }
+
+            if (paso === 7) {
+                return (
+                    <ResumenFinal
+                        datosCliente={datosCliente}
+                        carrito={carrito}
+                        onEditar={editarItem}
+                        onEliminar={eliminarItem}
+                        onAgregarMas={() => setPaso(1)}
+                        onVolver={() => setPaso(1)}
+                        onEnviar={enviarPedido}
+                        enviando={enviando}
+                    />
+                );
+            }
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+                    <Header />
+                    
+                    <div className="max-w-5xl mx-auto px-4 py-8">
+                        {paso > 0 && (
+                            <BarraProgreso paso={paso} totalPasos={6} />
+                        )}
+
+                        <div className="bg-white rounded-2xl shadow-xl p-8 mt-6">
+                            {paso === 0 && (
+                                <DatosCliente
+                                    datos={datosCliente}
+                                    onChange={setDatosCliente}
+                                    onContinuar={() => setPaso(1)}
+                                />
+                            )}
+
+                            {paso === 1 && (
+                                <SeleccionMarca
+                                    opciones={[...opcionesDisponibles.marcas, 'Otros']}
+                                    seleccionado={seleccion.marca}
+                                    onSeleccionar={(marca) => {
+                                        setSeleccion({ marca, mando: null, tipoSeccion: null, largo: null, modelo: null });
+                                        if (marca === 'Otros') {
+                                            setPaso(6);
+                                        } else {
+                                            setPaso(2);
+                                        }
+                                    }}
+                                    carrito={carrito}
+                                />
+                            )}
+
+                            {paso === 2 && (
+                                <SeleccionMando
+                                    opciones={opcionesDisponibles.mandos}
+                                    seleccionado={seleccion.mando}
+                                    onSeleccionar={(mando) => {
+                                        setSeleccion({ ...seleccion, mando, tipoSeccion: null, largo: null, modelo: null });
+                                        setPaso(3);
+                                    }}
+                                    onVolver={volver}
+                                />
+                            )}
+
+                            {paso === 3 && (
+                                <SeleccionTipoSeccion
+                                    opciones={opcionesDisponibles.tiposSeccion}
+                                    seleccionado={seleccion.tipoSeccion}
+                                    onSeleccionar={(tipo) => {
+                                        setSeleccion({ ...seleccion, tipoSeccion: tipo, largo: null, modelo: null });
+                                        setPaso(4);
+                                    }}
+                                    onVolver={volver}
+                                />
+                            )}
+
+                            {paso === 4 && (
+                                <SeleccionLargo
+                                    opciones={opcionesDisponibles.largos}
+                                    seleccionado={seleccion.largo}
+                                    onSeleccionar={(largo) => {
+                                        setSeleccion({ ...seleccion, largo, modelo: null });
+                                        
+                                        // Verificar si hay múltiples modelos
+                                        const modelosDisponibles = PLATAFORMAS_DATA.filter(p =>
+                                            p.marca === seleccion.marca &&
+                                            p.mando === seleccion.mando &&
+                                            p.tipoSeccion === seleccion.tipoSeccion &&
+                                            p.largo === largo
+                                        );
+                                        
+                                        if (modelosDisponibles.length > 1) {
+                                            setPaso(5);
+                                        } else {
+                                            setPaso(6);
+                                        }
+                                    }}
+                                    onVolver={volver}
+                                />
+                            )}
+
+                            {paso === 5 && (
+                                <SeleccionModelo
+                                    opciones={opcionesDisponibles.modelos}
+                                    seleccionado={seleccion.modelo}
+                                    onSeleccionar={(modelo) => {
+                                        setSeleccion({ ...seleccion, modelo });
+                                        setPaso(6);
+                                    }}
+                                    onVolver={volver}
+                                />
+                            )}
+
+                            {paso === 6 && (
+                                <ConfiguracionFinal
+                                    plataforma={plataformaSeleccionada}
+                                    configuracion={configuracion}
+                                    onChange={setConfiguracion}
+                                    onAgregar={agregarAlCarrito}
+                                    onVolver={volver}
+                                    esOtros={seleccion.marca === 'Otros'}
+                                    resistenciaTotal={calcularResistenciaReforzada(plataformaSeleccionada)}
+                                    editando={itemEditando !== null}
+                                />
+                            )}
+                        </div>
+
+                        {carrito.length > 0 && paso !== 7 && (
+                            <div className="mt-6">
+                                <CarritoResumen
+                                    items={carrito}
+                                    onVerResumen={() => setPaso(7)}
+                                    onEditar={editarItem}
+                                    onEliminar={eliminarItem}
+                                />
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        // Componentes individuales
+        function Header() {
+            return (
+                <div className="bg-white shadow-md">
+                    <div className="max-w-7xl mx-auto px-4 py-6">
+                        <div className="flex justify-between items-center flex-wrap gap-4">
+                            <div className="flex items-center space-x-3">
+                                <img 
+                                    src="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBzdGFuZGFsb25lPSJubyI/Pgo8IURPQ1RZUEUgc3ZnIFBVQkxJQyAiLS8vVzNDLy9EVEQgU1ZHIDEuMS8vRU4iICJodHRwOi8vd3d3LnczLm9yZy9HcmFwaGljcy9TVkcvMS4xL0RURC9zdmcxMS5kdGQiPgo8c3ZnIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgaWQ9IkNhcGFfMSIgdmlld0JveD0iMCAwIDEwNDYuMjYgMjAwLjEyIiB3aWR0aD0iMTA0Ni4yNjAwMDk3NjU2MjUiIGhlaWdodD0iMjAwLjExOTk5NTExNzE4NzUiPjxkZWZzPjxzdHlsZT4uY2xzLTF7ZmlsbDojMDAyODViO308L3N0eWxlPjwvZGVmcz48cGF0aCBjbGFzcz0iY2xzLTEiIGQ9Ik0yMDkuMTIsMTY4LjI4di05Mi43aC01Mi43MmwyOS4wNi0yOS4wMmgxMTIuNDd2MjkuMDJoLTUyLjcydjkyLjdoLTM2LjA5WiIvPjxwYXRoIGNsYXNzPSJjbHMtMSIgZD0iTTMwNS42NSwxNjguMjhWNDYuNTZoMTAxLjE5YzguODUsMCwxNi4xNiwxLjgzLDIxLjk0LDUuNDksNS43OCwzLjY2LDEwLjE0LDguNDcsMTMuMDksMTQuNDIsMi45NSw1Ljk2LDQuNDMsMTIuNDcsNC40MywxOS41NSwwLDcuNjctMS44MywxNC42Ni01LjQ5LDIwLjk2LTMuNjYsNi4zMS05LjE0LDExLjMtMTYuNDUsMTQuOTVsMjQuNzcsNDYuMzVoLTQwLjY5bC0yMC4xNy00MC41MWgtNDYuN3Y0MC41MWgtMzUuOTJaTTM0MS41NiwxMDEuMjNoNTMuNDNjNC4zNiwwLDcuODQtMS4yOSwxMC40NC0zLjg5LDIuNTktMi41OSwzLjg5LTYuMDcsMy44OS0xMC40NCwwLTIuODMtLjU5LTUuMjctMS43Ny03LjM0LTEuMTgtMi4wNi0yLjgzLTMuNjMtNC45NS00LjY5LTIuMTMtMS4wNi00LjY2LTEuNTktNy42MS0xLjU5aC01My40M3YyNy45NVoiLz48cGF0aCBjbGFzcz0iY2xzLTEiIGQ9Ik00NDQuODgsMTY4LjI4bDU5LjgtMTIxLjcyaDQwLjE2bDU5LjgsMTIxLjcyaC0zOS4xbC05LjItMTkuNDZoLTY1LjExbC05LjIsMTkuNDZoLTM3LjE1Wk01MDMuMjYsMTIyLjQ2aDQxLjA1bC0xMC45Ny0yNC43N2MtLjQ3LTEuMDYtMS4xMi0yLjYzLTEuOTUtNC42OS0uODMtMi4wNi0xLjcxLTQuMjUtMi42NS02LjU1LS45NS0yLjMtMS43Ny00LjQyLTIuNDgtNi4zNy0uNzEtMS45NC0xLjMtMy4zOS0xLjc3LTQuMzNoLTEuMjRjLS44MywyLjEyLTEuODMsNC42LTMsNy40My0xLjE4LDIuODMtMi4yNyw1LjU1LTMuMjgsOC4xNC0xLDIuNTktMS45Miw0LjcyLTIuNzQsNi4zN2wtMTAuOTcsMjQuNzdaIi8+PHBhdGggY2xhc3M9ImNscy0xIiBkPSJNNjcxLjUxLDE3MC40Yy0xNi45OCwwLTMxLjE0LTIuMzktNDIuNDYtNy4xNi0xMS4zMi00Ljc4LTE5LjgxLTExLjgyLTI1LjQ4LTIxLjE0LTUuNjYtOS4zMS04LjQ5LTIwLjg3LTguNDktMzQuNjcsMC0yMC4xNyw2LjUyLTM1LjcxLDE5LjU1LTQ2LjYyLDEzLjAzLTEwLjkxLDMyLjA1LTE2LjM3LDU3LjA2LTE2LjM3LDEzLjkxLDAsMjYuMTksMi4xLDM2LjgsNi4yOCwxMC42Miw0LjE5LDE4LjksMTAuMDksMjQuODYsMTcuNjksNS45NSw3LjYxLDguOTQsMTYuNiw4Ljk0LDI2Ljk4aC0zNS4wM2MwLTUuMDctMS41LTkuNDEtNC41MS0xMy4wMS0zLjAxLTMuNTktNy4yMy02LjM3LTEyLjY1LTguMzEtNS40My0xLjk1LTExLjc0LTIuOTItMTguOTMtMi45Mi04LjQ5LDAtMTUuNjMsMS40NC0yMS40MSw0LjMzLTUuNzgsMi44OS0xMC4xNyw2Ljg3LTEzLjE4LDExLjk0LTMuMDEsNS4wNy00LjUxLDEwLjk3LTQuNTEsMTcuNjl2NC40MmMwLDYuNzIsMS41LDEyLjY1LDQuNTEsMTcuNzgsMy4wMSw1LjEzLDcuMzcsOS4xNCwxMy4wOSwxMi4wMyw1LjcyLDIuODksMTIuNzEsNC4zNCwyMC45Nyw0LjM0LDcuNzgsMCwxNC40OC0uOTEsMjAuMDgtMi43NSw1LjYtMS44Myw5LjkxLTQuNTEsMTIuOTItOC4wNSwzLTMuNTQsNC41MS03Ljc4LDQuNTEtMTIuNzNoMzQuMzJjMCwxMC4wMi0yLjg5LDE4LjgxLTguNjcsMjYuMzYtNS43OCw3LjU1LTEzLjk1LDEzLjQyLTI0LjUsMTcuNi0xMC41Niw0LjE4LTIzLjE1LDYuMjgtMzcuNzcsNi4yOFoiLz48cGF0aCBjbGFzcz0iY2xzLTEiIGQ9Ik04MjQuMzYsMTcwLjRjLTE2LjA0LDAtMjkuMzEtMi4zMy0zOS44MS02Ljk5LTEwLjUtNC42Ni0xOC4zNC0xMS40NC0yMy41My0yMC4zNC01LjE5LTguOTEtNy43OC0xOS42MS03Ljc4LTMyLjExVjQ2LjU2aDM1LjkxdjYyLjgxYzAsMTAuODUsMy4wNywxOS4yOSw5LjIsMjUuMyw2LjEzLDYuMDIsMTQuOCw5LjAzLDI2LjAxLDkuMDNzMTkuODgtMy4wMSwyNi4wMS05LjAzYzYuMTMtNi4wMSw5LjItMTQuNDQsOS4yLTI1LjN2LTYyLjgxaDM2LjA5djY0LjRjMCwxMi41LTIuNiwyMy4yLTcuNzksMzIuMTEtNS4xOSw4LjkxLTEzLjA2LDE1LjY5LTIzLjYyLDIwLjM0LTEwLjU2LDQuNjYtMjMuODYsNi45OS0zOS45LDYuOTlaIi8+PHBhdGggY2xhc3M9ImNscy0xIiBkPSJNOTUxLjAzLDE2OC4yOHYtOTIuN2gtNDcuMzR2LTI5LjAyaDE0MS41M2wtMjEuOTcsMjkuMDJoLTM2LjE0djkyLjdoLTM2LjA5WiIvPjxwb2x5Z29uIGNsYXNzPSJjbHMtMSIgcG9pbnRzPSIxMjYuMTUgODQuMTcgMTc3Ljc3IDI3LjA4IDEzMC40NSAyNy4wOCAxMDMuMjEgNTguNDUgMTAwLjY2IDU4LjQ1IDUwLjg0IDAgMCAwIDc1LjYzIDg1Ljc5IC43OSAxNjguMjggNDguNzYgMTY4LjI4IDk4LjM0IDExMS4yOCAxMDAuODkgMTExLjI4IDE3NS4yNyAyMDAuMTIgMjI3LjE3IDIwMC4xMiAxMjYuMTUgODQuMTciLz48cGF0aCBjbGFzcz0iY2xzLTEiIGQ9Ik0xMDMzLjA2LDE2OC4yOGMtMS45LDAtMy42Ni0uMzMtNS4yNi0uOTgtMS42MS0uNjUtMy0xLjU3LTQuMTctMi43NC0xLjE3LTEuMTctMi4wOS0yLjU2LTIuNzUtNC4xNy0uNjUtMS42MS0uOTgtMy4zNi0uOTgtNS4yN3MuMzMtMy42Ni45OC01LjI2Yy42NS0xLjYxLDEuNTctMywyLjc1LTQuMTksMS4xNy0xLjE5LDIuNTYtMi4xMSw0LjE3LTIuNzYsMS42MS0uNjUsMy4zNi0uOTgsNS4yNi0uOThzMy42Ni4zMyw1LjI3Ljk4YzEuNjEuNjYsMywxLjU4LDQuMTksMi43NiwxLjE5LDEuMTksMi4xMSwyLjU4LDIuNzYsNC4xOS42NSwxLjYxLjk4LDMuMzYuOTgsNS4yNnMtLjMzLDMuNjYtLjk4LDUuMjdjLS42NSwxLjYxLTEuNTgsMy0yLjc2LDQuMTctMS4xOSwxLjE3LTIuNTgsMi4wOS00LjE5LDIuNzQtMS42MS42NS0zLjM2Ljk4LTUuMjcuOThaTTEwMzMuMDYsMTY2LjMxYzIuMiwwLDQuMTUtLjQ4LDUuODQtMS40NSwxLjY5LS45NiwzLjAyLTIuMjksMy45OS0zLjk5Ljk2LTEuNjksMS40NS0zLjYxLDEuNDUtNS43N3MtLjQ4LTQuMTEtMS40NS01LjhjLS45Ni0xLjY5LTIuMjktMy4wMi0zLjk5LTMuOTktMS42OS0uOTYtMy42NC0xLjQ0LTUuODQtMS40NHMtNC4xMi40OC01LjgyLDEuNDRjLTEuNzEuOTctMy4wNCwyLjI5LTQsMy45OS0uOTYsMS42OS0xLjQ1LDMuNjMtMS40NSw1LjhzLjQ5LDQuMDcsMS40Nyw1Ljc3Yy45OCwxLjY5LDIuMzEsMy4wMiw0LDMuOTksMS42OS45NywzLjYzLDEuNDUsNS44LDEuNDVaTTEwMjYuNzksMTYyLjc5di0xNS4zMWg3Ljk3YzEuNzMsMCwzLjA1LjQxLDMuOTUsMS4yMi45LjgyLDEuMzUsMS45MywxLjM1LDMuMzQsMCwxLjAxLS4yOCwxLjktLjgzLDIuNjctLjU2Ljc3LTEuMjksMS4zNi0yLjIxLDEuNzhsMy41Niw2LjNoLTMuMTlsLTMuMDQtNS43OGgtNC43MXY1Ljc4aC0yLjg2Wk0xMDI5LjY1LDE1NC42N2g0Ljg5Yy43NywwLDEuMzktLjIyLDEuODctLjY1LjQ4LS40My43Mi0xLjAzLjcyLTEuOHMtLjIzLTEuMzItLjctMS43NGMtLjQ3LS40Mi0xLjExLS42My0xLjkzLS42M2gtNC44NnY0LjgyWiIvPjwvc3ZnPg==" 
+                                    alt="Xtracut Logo" 
+                                    className="h-12 md:h-16 w-auto"
+                                />
+                                <span className="text-gray-400 text-2xl">|</span>
+                                <img 
+                                    src="data:image/png;base64,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" 
+                                    alt="Transcaden Logo" 
+                                    className="h-12 md:h-16 w-auto"
+                                />
+                            </div>
+                            <div className="text-right">
+                                <h1 className="text-xl md:text-2xl font-bold text-gray-800">
+                                    Selector de Plataformas
+                                </h1>
+                                <p className="text-sm text-gray-500">Sistema de cotización inteligente</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function BarraProgreso({ paso, totalPasos }) {
+            const progreso = (paso / totalPasos) * 100;
+            
+            return (
+                <div className="w-full">
+                    <div className="flex justify-between mb-2 text-sm text-gray-600">
+                        <span>Paso {paso} de {totalPasos}</span>
+                        <span>{Math.round(progreso)}%</span>
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                        <div 
+                            className="progress-bar h-full gradient-green rounded-full"
+                            style={{ width: `${progreso}%` }}
+                        />
+                    </div>
+                </div>
+            );
+        }
+
+        function DatosCliente({ datos, onChange, onContinuar }) {
+            const isValid = datos.razonSocial.trim() && datos.email.trim() && datos.email.includes('@');
+
+            return (
+                <div className="space-y-6">
+                    <div className="text-center">
+                        <h2 className="text-3xl font-bold text-gray-800 mb-2">
+                            Bienvenido
+                        </h2>
+                        <p className="text-gray-600">
+                            Ingresa tus datos para comenzar la cotización
+                        </p>
+                    </div>
+
+                    <div className="space-y-4 max-w-md mx-auto">
+                        <div>
+                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                Razón Social *
+                            </label>
+                            <input
+                                type="text"
+                                value={datos.razonSocial}
+                                onChange={(e) => onChange({ ...datos, razonSocial: e.target.value })}
+                                className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-green-500 focus:outline-none transition"
+                                placeholder="Nombre de tu empresa"
+                            />
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                Email *
+                            </label>
+                            <input
+                                type="email"
+                                value={datos.email}
+                                onChange={(e) => onChange({ ...datos, email: e.target.value })}
+                                className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-green-500 focus:outline-none transition"
+                                placeholder="tu@email.com"
+                            />
+                        </div>
+
+                        <button
+                            onClick={onContinuar}
+                            disabled={!isValid}
+                            className={`w-full py-4 rounded-lg font-semibold text-white text-lg transition ${
+                                isValid
+                                    ? 'gradient-green hover:opacity-90 hover-lift cursor-pointer'
+                                    : 'bg-gray-300 cursor-not-allowed'
+                            }`}
+                        >
+                            Continuar →
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        function SeleccionMarca({ opciones, seleccionado, onSeleccionar, carrito }) {
+            return (
+                <div className="space-y-6">
+                    <div className="text-center">
+                        <h2 className="text-3xl font-bold text-gray-800 mb-2">
+                            Selecciona la Marca
+                        </h2>
+                        <p className="text-gray-600">
+                            ¿De qué marca es tu plataforma?
+                        </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {opciones.map(marca => (
+                            <button
+                                key={marca}
+                                onClick={() => onSeleccionar(marca)}
+                                className={`p-6 rounded-xl border-2 transition hover-lift ${
+                                    marca === 'Otros'
+                                        ? 'border-gray-300 bg-gray-50 hover:border-gray-400'
+                                        : 'border-green-200 bg-green-50 hover:border-green-500'
+                                }`}
+                            >
+                                <div className="text-xl font-bold text-gray-800">{marca}</div>
+                            </button>
+                        ))}
+                    </div>
+
+                    {carrito.length > 0 && (
+                        <div className="text-center pt-4">
+                            <p className="text-sm text-gray-500">
+                                {carrito.length} plataforma{carrito.length !== 1 ? 's' : ''} en el carrito
+                            </p>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function SeleccionMando({ opciones, seleccionado, onSeleccionar, onVolver }) {
+            return (
+                <div className="space-y-6">
+                    <button onClick={onVolver} className="text-blue-600 hover:text-blue-800 font-semibold">
+                        ← Volver
+                    </button>
+
+                    <div className="text-center">
+                        <h2 className="text-3xl font-bold text-gray-800 mb-2">
+                            Tipo de Mando
+                        </h2>
+                        <p className="text-gray-600">
+                            ¿Qué tipo de mando tiene tu plataforma?
+                        </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-3xl mx-auto">
+                        {opciones.map(mando => (
+                            <button
+                                key={mando}
+                                onClick={() => onSeleccionar(mando)}
+                                className="p-8 rounded-xl border-2 border-blue-200 bg-blue-50 hover:border-blue-500 transition hover-lift"
+                            >
+                                <div className="text-xl font-bold text-gray-800">{mando}</div>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            );
+        }
+
+        function SeleccionTipoSeccion({ opciones, seleccionado, onSeleccionar, onVolver }) {
+            return (
+                <div className="space-y-6">
+                    <button onClick={onVolver} className="text-blue-600 hover:text-blue-800 font-semibold">
+                        ← Volver
+                    </button>
+
+                    <div className="text-center">
+                        <h2 className="text-3xl font-bold text-gray-800 mb-2">
+                            Tipo de Sección
+                        </h2>
+                        <p className="text-gray-600">
+                            Selecciona el código de tu sección
+                        </p>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                        {opciones.map(tipo => (
+                            <button
+                                key={tipo}
+                                onClick={() => onSeleccionar(tipo)}
+                                className="p-6 rounded-xl border-2 border-green-200 bg-green-50 hover:border-green-500 transition hover-lift"
+                            >
+                                <div className="text-lg font-bold text-gray-800">{tipo}</div>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            );
+        }
+
+        function SeleccionLargo({ opciones, seleccionado, onSeleccionar, onVolver }) {
+            return (
+                <div className="space-y-6">
+                    <button onClick={onVolver} className="text-blue-600 hover:text-blue-800 font-semibold">
+                        ← Volver
+                    </button>
+
+                    <div className="text-center">
+                        <h2 className="text-3xl font-bold text-gray-800 mb-2">
+                            Largo de la Plataforma
+                        </h2>
+                        <p className="text-gray-600">
+                            ¿Cuál es el largo de tu plataforma?
+                        </p>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        {opciones.map(largo => (
+                            <button
+                                key={largo}
+                                onClick={() => onSeleccionar(largo)}
+                                className="p-6 rounded-xl border-2 border-blue-200 bg-blue-50 hover:border-blue-500 transition hover-lift"
+                            >
+                                <div className="text-xl font-bold text-gray-800">{largo}</div>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            );
+        }
+
+        function SeleccionModelo({ opciones, seleccionado, onSeleccionar, onVolver }) {
+            return (
+                <div className="space-y-6">
+                    <button onClick={onVolver} className="text-blue-600 hover:text-blue-800 font-semibold">
+                        ← Volver
+                    </button>
+
+                    <div className="text-center">
+                        <h2 className="text-3xl font-bold text-gray-800 mb-2">
+                            Modelo de Plataforma
+                        </h2>
+                        <p className="text-gray-600">
+                            Hay varios modelos con estas características, selecciona el tuyo
+                        </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {opciones.map(modelo => (
+                            <button
+                                key={modelo}
+                                onClick={() => onSeleccionar(modelo)}
+                                className="p-8 rounded-xl border-2 border-green-200 bg-green-50 hover:border-green-500 transition hover-lift"
+                            >
+                                <div className="text-xl font-bold text-gray-800">{modelo}</div>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            );
+        }
+
+        function ConfiguracionFinal({ plataforma, configuracion, onChange, onAgregar, onVolver, esOtros, resistenciaTotal, editando }) {
+            const isValid = configuracion.tipoDiente && configuracion.cantidad >= 1;
+            const tieneOpcionReforzada = plataforma && (
+                plataforma.cambio22 === 'si' || 
+                plataforma.refSup === 'si' || 
+                plataforma.refInf === 'si'
+            );
+
+            return (
+                <div className="space-y-6">
+                    {!esOtros && (
+                        <button onClick={onVolver} className="text-blue-600 hover:text-blue-800 font-semibold">
+                            ← Volver
+                        </button>
+                    )}
+
+                    <div className="text-center">
+                        <h2 className="text-3xl font-bold text-gray-800 mb-2">
+                            Configuración Final
+                        </h2>
+                        {!esOtros && plataforma && (
+                            <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+                                <p className="text-sm text-gray-600">Plataforma seleccionada:</p>
+                                <p className="font-bold text-lg text-gray-800">
+                                    {plataforma.marca} - {plataforma.modelo}
+                                </p>
+                                <p className="text-sm text-gray-600">
+                                    {plataforma.mando} | {plataforma.tipoSeccion} | {plataforma.largo}
+                                </p>
+                                <p className="text-xs text-gray-500 mt-1">
+                                    Varilla original: {plataforma.varilla}
+                                </p>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="space-y-6 max-w-2xl mx-auto">
+                        <div>
+                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                Cantidad *
+                            </label>
+                            <input
+                                type="number"
+                                min="1"
+                                value={configuracion.cantidad}
+                                onChange={(e) => onChange({ ...configuracion, cantidad: Math.max(1, parseInt(e.target.value) || 1) })}
+                                className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-green-500 focus:outline-none transition"
+                            />
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-semibold text-gray-700 mb-3">
+                                Tipo de Diente *
+                            </label>
+                            <div className="grid grid-cols-2 gap-4">
+                                {['Diente Grueso', 'Diente Fino'].map(tipo => (
+                                    <button
+                                        key={tipo}
+                                        onClick={() => onChange({ ...configuracion, tipoDiente: tipo })}
+                                        className={`p-4 rounded-lg border-2 transition font-semibold ${
+                                            configuracion.tipoDiente === tipo
+                                                ? 'border-green-500 bg-green-100 text-green-800'
+                                                : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+                                        }`}
+                                    >
+                                        {tipo}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {!esOtros && tieneOpcionReforzada && (
+                            <div className="p-6 border-2 border-yellow-300 rounded-xl bg-gradient-to-br from-yellow-50 to-orange-50">
+                                <div className="flex items-start space-x-3">
+                                    <input
+                                        type="checkbox"
+                                        id="reforzada"
+                                        checked={configuracion.reforzada}
+                                        onChange={(e) => onChange({ ...configuracion, reforzada: e.target.checked })}
+                                        className="mt-1 w-5 h-5 text-orange-500"
+                                    />
+                                    <div className="flex-1">
+                                        <label htmlFor="reforzada" className="font-bold text-lg text-orange-800 cursor-pointer">
+                                            ⭐ OPCIÓN REFORZADA PREMIUM
+                                        </label>
+                                        <p className="text-sm text-orange-700 mt-1 mb-3">
+                                            <strong>+{resistenciaTotal}% de resistencia total</strong>
+                                        </p>
+                                        <div className="space-y-2 text-sm text-gray-700">
+                                            {plataforma.cambio22 === 'si' && (
+                                                <div className="flex items-center space-x-2">
+                                                    <span className="text-green-600">✓</span>
+                                                    <span>Varilla de 22mm (+29% resistencia)</span>
+                                                </div>
+                                            )}
+                                            {plataforma.refSup === 'si' && (
+                                                <div className="flex items-center space-x-2">
+                                                    <span className="text-green-600">✓</span>
+                                                    <span>Refuerzo Superior (+6% resistencia)</span>
+                                                </div>
+                                            )}
+                                            {plataforma.refInf === 'si' && (
+                                                <div className="flex items-center space-x-2">
+                                                    <span className="text-green-600">✓</span>
+                                                    <span>Refuerzo Inferior (+6% resistencia)</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        <div>
+                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                Comentarios (opcional)
+                            </label>
+                            <textarea
+                                value={configuracion.comentarios}
+                                onChange={(e) => onChange({ ...configuracion, comentarios: e.target.value })}
+                                rows="4"
+                                className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-green-500 focus:outline-none transition"
+                                placeholder="Agrega cualquier detalle adicional..."
+                            />
+                        </div>
+
+                        <button
+                            onClick={onAgregar}
+                            disabled={!isValid}
+                            className={`w-full py-4 rounded-lg font-semibold text-white text-lg transition ${
+                                isValid
+                                    ? 'gradient-green hover:opacity-90 hover-lift cursor-pointer'
+                                    : 'bg-gray-300 cursor-not-allowed'
+                            }`}
+                        >
+                            {editando ? '✓ Actualizar Item' : '+ Agregar al Carrito'}
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        function CarritoResumen({ items, onVerResumen, onEditar, onEliminar }) {
+            return (
+                <div className="bg-white rounded-xl shadow-lg p-6">
+                    <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-xl font-bold text-gray-800">
+                            Carrito ({items.length} {items.length === 1 ? 'item' : 'items'})
+                        </h3>
+                        <button
+                            onClick={onVerResumen}
+                            className="gradient-blue text-white px-6 py-2 rounded-lg font-semibold hover:opacity-90 transition"
+                        >
+                            Ver Resumen Completo →
+                        </button>
+                    </div>
+
+                    <div className="space-y-3">
+                        {items.slice(-3).reverse().map(item => (
+                            <div key={item.id} className="flex justify-between items-center p-4 bg-gray-50 rounded-lg">
+                                <div className="flex-1">
+                                    <p className="font-semibold text-gray-800">
+                                        {item.marca} - {item.modelo}
+                                    </p>
+                                    <p className="text-sm text-gray-600">
+                                        {item.tipoDiente} • Cantidad: {item.cantidad}
+                                        {item.reforzada && <span className="text-orange-600 ml-2">⭐ REFORZADA</span>}
+                                    </p>
+                                </div>
+                                <div className="flex space-x-2">
+                                    <button
+                                        onClick={() => onEditar(item)}
+                                        className="text-blue-600 hover:text-blue-800 px-3 py-1 rounded-lg hover:bg-blue-50 transition"
+                                    >
+                                        Editar
+                                    </button>
+                                    <button
+                                        onClick={() => onEliminar(item.id)}
+                                        className="text-red-600 hover:text-red-800 px-3 py-1 rounded-lg hover:bg-red-50 transition"
+                                    >
+                                        Eliminar
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    {items.length > 3 && (
+                        <p className="text-sm text-gray-500 text-center mt-3">
+                            Y {items.length - 3} más... Ver resumen completo
+                        </p>
+                    )}
+                </div>
+            );
+        }
+
+        function ResumenFinal({ datosCliente, carrito, onEditar, onEliminar, onAgregarMas, onVolver, onEnviar, enviando }) {
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 py-8">
+                    <div className="max-w-4xl mx-auto px-4">
+                        <div className="bg-white rounded-2xl shadow-xl p-8">
+                            <h2 className="text-3xl font-bold text-gray-800 mb-2 text-center">
+                                Resumen del Pedido
+                            </h2>
+                            <p className="text-gray-600 text-center mb-8">
+                                Revisa tu pedido antes de enviar
+                            </p>
+
+                            <div className="mb-8 p-6 bg-blue-50 rounded-xl">
+                                <h3 className="font-bold text-lg text-gray-800 mb-3">Datos del Cliente</h3>
+                                <p className="text-gray-700"><strong>Razón Social:</strong> {datosCliente.razonSocial}</p>
+                                <p className="text-gray-700"><strong>Email:</strong> {datosCliente.email}</p>
+                            </div>
+
+                            <div className="mb-8">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="font-bold text-lg text-gray-800">
+                                        Plataformas ({carrito.length})
+                                    </h3>
+                                    <button
+                                        onClick={onAgregarMas}
+                                        className="text-green-600 hover:text-green-800 font-semibold text-sm"
+                                    >
+                                        + Agregar otra plataforma
+                                    </button>
+                                </div>
+
+                                <div className="space-y-4">
+                                    {carrito.map((item, index) => (
+                                        <div key={item.id} className="p-6 border-2 border-gray-200 rounded-xl hover:border-gray-300 transition">
+                                            <div className="flex justify-between items-start mb-3">
+                                                <div>
+                                                    <div className="flex items-center space-x-2 mb-2">
+                                                        <span className="font-bold text-gray-800 text-lg">
+                                                            {index + 1}. {item.marca} - {item.modelo}
+                                                        </span>
+                                                        {item.reforzada && (
+                                                            <span className="gradient-yellow text-white text-xs px-2 py-1 rounded font-semibold">
+                                                                ⭐ REFORZADA +{item.resistenciaTotal}%
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <div className="text-sm text-gray-600 space-y-1">
+                                                        <p><strong>Mando:</strong> {item.mando}</p>
+                                                        <p><strong>Tipo de sección:</strong> {item.tipoSeccion}</p>
+                                                        <p><strong>Largo:</strong> {item.largo}</p>
+                                                        <p><strong>Varilla original:</strong> {item.varilla}</p>
+                                                        <p><strong>Tipo de diente:</strong> {item.tipoDiente}</p>
+                                                        <p><strong>Cantidad:</strong> {item.cantidad}</p>
+                                                        {item.comentarios && (
+                                                            <p><strong>Comentarios:</strong> {item.comentarios}</p>
+                                                        )}
+                                                        {item.reforzada && item.detallesReforzada && (
+                                                            <div className="mt-2 p-2 bg-orange-50 rounded text-xs">
+                                                                <p className="font-semibold text-orange-800">Mejoras incluidas:</p>
+                                                                {item.detallesReforzada.varilla22 && <p>• Varilla 22mm (+29%)</p>}
+                                                                {item.detallesReforzada.refSup && <p>• Refuerzo Superior (+6%)</p>}
+                                                                {item.detallesReforzada.refInf && <p>• Refuerzo Inferior (+6%)</p>}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                <div className="flex space-x-2">
+                                                    <button
+                                                        onClick={() => onEditar(item)}
+                                                        className="text-blue-600 hover:text-blue-800 px-3 py-1 rounded-lg hover:bg-blue-50 transition text-sm"
+                                                    >
+                                                        Editar
+                                                    </button>
+                                                    <button
+                                                        onClick={() => onEliminar(item.id)}
+                                                        className="text-red-600 hover:text-red-800 px-3 py-1 rounded-lg hover:bg-red-50 transition text-sm"
+                                                    >
+                                                        Eliminar
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="flex space-x-4">
+                                <button
+                                    onClick={onVolver}
+                                    className="flex-1 py-4 border-2 border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 transition"
+                                >
+                                    ← Volver
+                                </button>
+                                <button
+                                    onClick={onEnviar}
+                                    disabled={enviando || carrito.length === 0}
+                                    className={`flex-1 py-4 rounded-lg font-semibold text-white text-lg transition ${
+                                        enviando || carrito.length === 0
+                                            ? 'bg-gray-300 cursor-not-allowed'
+                                            : 'gradient-green hover:opacity-90 hover-lift cursor-pointer'
+                                    }`}
+                                >
+                                    {enviando ? (
+                                        <span className="flex items-center justify-center">
+                                            <svg className="animate-spin h-5 w-5 mr-3" viewBox="0 0 24 24">
+                                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                            </svg>
+                                            Enviando...
+                                        </span>
+                                    ) : (
+                                        '✓ Confirmar y Enviar Pedido'
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function PantallaConfirmacion({ onNuevoPedido }) {
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-50 flex items-center justify-center px-4">
+                    <div className="max-w-2xl w-full bg-white rounded-2xl shadow-2xl p-12 text-center">
+                        <div className="w-20 h-20 bg-green-500 rounded-full flex items-center justify-center mx-auto mb-6">
+                            <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
+                            </svg>
+                        </div>
+
+                        <h2 className="text-4xl font-bold text-gray-800 mb-4">
+                            ¡Pedido Enviado!
+                        </h2>
+                        
+                        <p className="text-lg text-gray-600 mb-3">
+                            Tu cotización ha sido enviada exitosamente.
+                        </p>
+                        
+                        <p className="text-gray-600 mb-8">
+                            Recibirás una copia en tu email y nuestro equipo de ingeniería 
+                            procesará tu pedido a la brevedad.
+                        </p>
+
+                        <div className="p-6 bg-blue-50 rounded-xl mb-8 text-left">
+                            <p className="text-sm text-gray-700 mb-2">
+                                <strong>📧 Email enviado a:</strong>
+                            </p>
+                            <p className="text-sm text-gray-600">• Tu email (confirmación)</p>
+                            <p className="text-sm text-gray-600">• {EMAIL_INGENIERIA} (procesamiento)</p>
+                        </div>
+
+                        <button
+                            onClick={onNuevoPedido}
+                            className="gradient-green text-white px-8 py-4 rounded-lg font-semibold text-lg hover:opacity-90 transition hover-lift"
+                        >
+                            Hacer Nuevo Pedido
+                        </button>
+
+                        <p className="text-xs text-gray-500 mt-6">
+                            Este pedido fue generado automáticamente desde el selector de plataformas Xtracut
+                        </p>
+                    </div>
+                </div>
+            );
+        }
+
+        // Renderizar aplicación
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+
+    <script>
+        // Datos de plataformas (base de datos en memoria)
+        const PLATAFORMAS_JSON_DATA = [
+  {
+    "marca": "John Deere",
+    "modelo": 319,
+    "mando": "Simple",
+    "tipoSeccion": "3\" (H84415)",
+    "largo": "19 ft",
+    "varilla": "19mm",
+    "cambio22": "si",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "John Deere",
+    "modelo": "622F",
+    "mando": "Simple",
+    "tipoSeccion": "3\" (H84415)",
+    "largo": "22 ft",
+    "varilla": "19mm",
+    "cambio22": "si",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "John Deere",
+    "modelo": 323,
+    "mando": "Simple",
+    "tipoSeccion": "3\" (H84415)",
+    "largo": "23 ft",
+    "varilla": "19mm",
+    "cambio22": "si",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "John Deere",
+    "modelo": "325-625F",
+    "mando": "Simple",
+    "tipoSeccion": "3\" (H84415)",
+    "largo": "25 ft",
+    "varilla": "19mm",
+    "cambio22": "si",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "John Deere",
+    "modelo": "930-930F-630",
+    "mando": "Simple",
+    "tipoSeccion": "3\" (H84415)",
+    "largo": "30 ft",
+    "varilla": "19mm",
+    "cambio22": "si",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "John Deere",
+    "modelo": "935-935F-635",
+    "mando": "Simple",
+    "tipoSeccion": "3\" (H84415)",
+    "largo": "35 ft",
+    "varilla": "19mm",
+    "cambio22": "si",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "John Deere",
+    "modelo": "625F",
+    "mando": "Simple",
+    "tipoSeccion": "4\" (H163131)",
+    "largo": "25 ft",
+    "varilla": "19mm",
+    "cambio22": "no",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "John Deere",
+    "modelo": "630F",
+    "mando": "Simple",
+    "tipoSeccion": "4\" (H163131)",
+    "largo": "30 ft",
+    "varilla": "19mm",
+    "cambio22": "no",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "John Deere",
+    "modelo": "635F",
+    "mando": "Simple",
+    "tipoSeccion": "4\" (H163131)",
+    "largo": "35 ft",
+    "varilla": "19mm",
+    "cambio22": "no",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "John Deere",
+    "modelo": "DRAPER 635FD",
+    "mando": "Doble",
+    "tipoSeccion": "4\" (H163131)",
+    "largo": "35 ft",
+    "varilla": "19mm",
+    "cambio22": "no",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "John Deere",
+    "modelo": "DRAPER 640FD",
+    "mando": "Doble",
+    "tipoSeccion": "4\" (H163131)",
+    "largo": "40 ft",
+    "varilla": "19mm",
+    "cambio22": "no",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "John Deere",
+    "modelo": "DRAPER 645FD",
+    "mando": "Doble",
+    "tipoSeccion": "4\" (H163131)",
+    "largo": "45 ft",
+    "varilla": "19mm",
+    "cambio22": "no",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "Case",
+    "modelo": 1020,
+    "mando": "Simple",
+    "tipoSeccion": "C98",
+    "largo": "25 ft",
+    "varilla": "19mm",
+    "cambio22": "si",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "Case",
+    "modelo": 1020,
+    "mando": "Simple",
+    "tipoSeccion": "C98",
+    "largo": "30 ft",
+    "varilla": "19mm",
+    "cambio22": "si",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "Case",
+    "modelo": 1020,
+    "mando": "Simple",
+    "tipoSeccion": "C98",
+    "largo": "35 ft",
+    "varilla": "19mm",
+    "cambio22": "si",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "Case",
+    "modelo": 2020,
+    "mando": "Doble",
+    "tipoSeccion": "C98",
+    "largo": "35 ft",
+    "varilla": "19mm",
+    "cambio22": "si",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "Case",
+    "modelo": "3020 TerraFlex",
+    "mando": "Simple",
+    "tipoSeccion": "87728905",
+    "largo": "25 ft",
+    "varilla": "19mm",
+    "cambio22": "si",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "Case",
+    "modelo": "3020 TerraFlex",
+    "mando": "Doble",
+    "tipoSeccion": "87728905",
+    "largo": "30 ft",
+    "varilla": "19mm",
+    "cambio22": "si",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "Case",
+    "modelo": "DRAPER 3162",
+    "mando": "Doble(central)",
+    "tipoSeccion": "87728905",
+    "largo": "30 ft",
+    "varilla": "19mm",
+    "cambio22": "si",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "Case",
+    "modelo": "3020 TerraFlex",
+    "mando": "Doble",
+    "tipoSeccion": "87728905",
+    "largo": "35 ft",
+    "varilla": "19mm",
+    "cambio22": "si",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "Case",
+    "modelo": "DRAPER 3162",
+    "mando": "Doble(central)",
+    "tipoSeccion": "87728905",
+    "largo": "35 ft",
+    "varilla": "19mm",
+    "cambio22": "si",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "Case",
+    "modelo": "DRAPER 3162",
+    "mando": "Doble(central)",
+    "tipoSeccion": "87728905",
+    "largo": "40 ft",
+    "varilla": "19mm",
+    "cambio22": "si",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "Case",
+    "modelo": "DRAPER 3162",
+    "mando": "Doble(central)",
+    "tipoSeccion": "87728905",
+    "largo": "45 ft",
+    "varilla": "19mm",
+    "cambio22": "si",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "New Holland",
+    "modelo": "SuperFlex (TC57)",
+    "mando": "Simple",
+    "tipoSeccion": "NH36 aguj. cua.",
+    "largo": "19 ft",
+    "varilla": "19mm",
+    "cambio22": "no",
+    "refSup": "no",
+    "refInf": "no"
+  },
+  {
+    "marca": "New Holland",
+    "modelo": "SuperFlex (TC59)",
+    "mando": "Simple",
+    "tipoSeccion": "NH36 aguj. cua.",
+    "largo": "24 ft",
+    "varilla": "19mm",
+    "cambio22": "no",
+    "refSup": "no",
+    "refInf": "no"
+  },
+  {
+    "marca": "New Holland",
+    "modelo": "CS660- CR9060",
+    "mando": "Doble",
+    "tipoSeccion": "NH36 aguj. cua.",
+    "largo": "30 ft",
+    "varilla": "19mm",
+    "cambio22": "no",
+    "refSup": "no",
+    "refInf": "no"
+  },
+  {
+    "marca": "New Holland",
+    "modelo": 2020,
+    "mando": "Doble",
+    "tipoSeccion": "NH36 aguj. cua.",
+    "largo": "35 ft",
+    "varilla": "19mm",
+    "cambio22": "no",
+    "refSup": "no",
+    "refInf": "no"
+  },
+  {
+    "marca": "New Holland",
+    "modelo": "740CF Superflex",
+    "mando": "Simple",
+    "tipoSeccion": "87728905",
+    "largo": "25 ft",
+    "varilla": "19mm",
+    "cambio22": "si",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "New Holland",
+    "modelo": "740CF Superflex",
+    "mando": "Doble",
+    "tipoSeccion": "87728905",
+    "largo": "30 ft",
+    "varilla": "19mm",
+    "cambio22": "si",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "New Holland",
+    "modelo": "740CF Superflex",
+    "mando": "Doble",
+    "tipoSeccion": "87728905",
+    "largo": "35 ft",
+    "varilla": "19mm",
+    "cambio22": "si",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "New Holland",
+    "modelo": "DRAPER 840CD",
+    "mando": "Doble(central)",
+    "tipoSeccion": "87728905",
+    "largo": "35 ft",
+    "varilla": "19mm",
+    "cambio22": "si",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "New Holland",
+    "modelo": "DRAPER 840CD",
+    "mando": "Doble(central)",
+    "tipoSeccion": "87728905",
+    "largo": "40 ft",
+    "varilla": "19mm",
+    "cambio22": "si",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "New Holland",
+    "modelo": "DRAPER 840CD",
+    "mando": "Doble(central)",
+    "tipoSeccion": "87728905",
+    "largo": "45 ft",
+    "varilla": "19mm",
+    "cambio22": "si",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "MacDon",
+    "modelo": "FD70-D FLEXDRAPER",
+    "mando": "Simple",
+    "tipoSeccion": "47678533",
+    "largo": "30 ft",
+    "varilla": "19mm",
+    "cambio22": "si",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "MacDon",
+    "modelo": "FD70-D FLEXDRAPER",
+    "mando": "Simple",
+    "tipoSeccion": "47678533",
+    "largo": "35 ft",
+    "varilla": "19mm",
+    "cambio22": "si",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "MacDon",
+    "modelo": "FD70-D FLEXDRAPER",
+    "mando": "Doble",
+    "tipoSeccion": "47678533",
+    "largo": "35 ft",
+    "varilla": "19mm",
+    "cambio22": "si",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "MacDon",
+    "modelo": "FD70-D FLEXDRAPER",
+    "mando": "Doble",
+    "tipoSeccion": "47678533",
+    "largo": "40 ft",
+    "varilla": "19mm",
+    "cambio22": "si",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "MacDon",
+    "modelo": "FD70-D FLEXDRAPER",
+    "mando": "Doble",
+    "tipoSeccion": "47678533",
+    "largo": "45 ft",
+    "varilla": "19mm",
+    "cambio22": "si",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "CLAAS",
+    "modelo": "CLAAS",
+    "mando": "Simple",
+    "tipoSeccion": "0611 203 1",
+    "largo": "23 ft",
+    "varilla": "22mm",
+    "cambio22": "no",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "CLAAS",
+    "modelo": "MAXFLEX 770",
+    "mando": "Simple",
+    "tipoSeccion": "0611 203 1",
+    "largo": "25 ft",
+    "varilla": "22mm",
+    "cambio22": "no",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "CLAAS",
+    "modelo": "MAXFLEX 930",
+    "mando": "Simple",
+    "tipoSeccion": "0611 203 1",
+    "largo": "30 ft",
+    "varilla": "22mm",
+    "cambio22": "no",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "CLAAS",
+    "modelo": "CLAAS",
+    "mando": "Doble",
+    "tipoSeccion": "0611 203 1",
+    "largo": "30 ft",
+    "varilla": "22mm",
+    "cambio22": "no",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "CLAAS",
+    "modelo": "DRAPER HERA 980",
+    "mando": "Doble",
+    "tipoSeccion": "0611 203 1",
+    "largo": "32 ft",
+    "varilla": "22mm",
+    "cambio22": "no",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "CLAAS",
+    "modelo": "MAXFLEX / VARIO 1200",
+    "mando": "Doble",
+    "tipoSeccion": "0611 203 1",
+    "largo": "35 ft",
+    "varilla": "22mm",
+    "cambio22": "no",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "CLAAS",
+    "modelo": "DRAPER HERA 1130",
+    "mando": "Doble",
+    "tipoSeccion": "0611 203 1",
+    "largo": "37 ft",
+    "varilla": "22mm",
+    "cambio22": "no",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "CLAAS",
+    "modelo": "MAXFLEX / VARIO 1200",
+    "mando": "Doble",
+    "tipoSeccion": "0611 203 1",
+    "largo": "40 ft",
+    "varilla": "22mm",
+    "cambio22": "no",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "CLAAS",
+    "modelo": "DRAPER HERA 1270",
+    "mando": "Doble",
+    "tipoSeccion": "0611 203 1",
+    "largo": "42 ft",
+    "varilla": "22mm",
+    "cambio22": "no",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "CLAAS",
+    "modelo": "DRAPER HERA 1430",
+    "mando": "Doble",
+    "tipoSeccion": "0611 203 1",
+    "largo": "47 ft",
+    "varilla": "22mm",
+    "cambio22": "no",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "Vassalli",
+    "modelo": "UNIVERSAL",
+    "mando": "Simple",
+    "tipoSeccion": "206236",
+    "largo": "19 ft",
+    "varilla": "25mm",
+    "cambio22": "no",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "Vassalli",
+    "modelo": "UNIVERSAL",
+    "mando": "Simple",
+    "tipoSeccion": "206236",
+    "largo": "21 ft",
+    "varilla": "25mm",
+    "cambio22": "no",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "Vassalli",
+    "modelo": "FLEXIFULL 700",
+    "mando": "Simple",
+    "tipoSeccion": "206236",
+    "largo": "23 ft",
+    "varilla": "25mm",
+    "cambio22": "no",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "Vassalli",
+    "modelo": "FLEXIFULL 760",
+    "mando": "Simple",
+    "tipoSeccion": "206236",
+    "largo": "25 ft",
+    "varilla": "25mm",
+    "cambio22": "no",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "Vassalli",
+    "modelo": "UNIVERSAL",
+    "mando": "Simple",
+    "tipoSeccion": "206236",
+    "largo": "28 ft",
+    "varilla": "25mm",
+    "cambio22": "no",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "Vassalli",
+    "modelo": "FLEXIFULL 840",
+    "mando": "Doble",
+    "tipoSeccion": "206236",
+    "largo": "28 ft",
+    "varilla": "25mm",
+    "cambio22": "no",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "Vassalli",
+    "modelo": "FLEXIFULL 9.100",
+    "mando": "Doble",
+    "tipoSeccion": "206236",
+    "largo": "30 ft",
+    "varilla": "25mm",
+    "cambio22": "no",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "Vassalli",
+    "modelo": "FLEXIDRAP 9.100",
+    "mando": "Doble",
+    "tipoSeccion": "206236",
+    "largo": "30 ft",
+    "varilla": "25mm",
+    "cambio22": "no",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "Vassalli",
+    "modelo": "FLEXIDRAP 10.500",
+    "mando": "Doble",
+    "tipoSeccion": "206236",
+    "largo": "35 ft",
+    "varilla": "25mm",
+    "cambio22": "no",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "Vassalli",
+    "modelo": "FLEXIDRAP 12.000",
+    "mando": "Doble",
+    "tipoSeccion": "206236",
+    "largo": "40 ft",
+    "varilla": "25mm",
+    "cambio22": "no",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "Don Roque",
+    "modelo": "D.ROQUE 125 M ",
+    "mando": "Simple",
+    "tipoSeccion": "206236",
+    "largo": "23 ft",
+    "varilla": "25mm",
+    "cambio22": "no",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "Don Roque",
+    "modelo": "D.ROQUE 125 M ",
+    "mando": "Simple",
+    "tipoSeccion": "206236",
+    "largo": "25 ft",
+    "varilla": "25mm",
+    "cambio22": "no",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "Don Roque",
+    "modelo": "D.R.150 ELECTRO",
+    "mando": "Doble",
+    "tipoSeccion": "206236",
+    "largo": "28 ft",
+    "varilla": "25mm",
+    "cambio22": "no",
+    "refSup": "si",
+    "refInf": "si"
+  },
+  {
+    "marca": "Schumacher",
+    "modelo": "DynaFlex 9250",
+    "mando": "Simple",
+    "tipoSeccion": "10961",
+    "largo": "25 ft",
+    "varilla": "22mm",
+    "cambio22": "no",
+    "refSup": "no",
+    "refInf": "si"
+  },
+  {
+    "marca": "Schumacher",
+    "modelo": "DynaFlex 9250",
+    "mando": "Doble",
+    "tipoSeccion": "10961",
+    "largo": "30 ft",
+    "varilla": "22mm",
+    "cambio22": "no",
+    "refSup": "no",
+    "refInf": "si"
+  },
+  {
+    "marca": "Schumacher",
+    "modelo": "DynaFlex 9250",
+    "mando": "Doble",
+    "tipoSeccion": "10961",
+    "largo": "35 ft",
+    "varilla": "22mm",
+    "cambio22": "no",
+    "refSup": "no",
+    "refInf": "si"
+  },
+  {
+    "marca": "Schumacher",
+    "modelo": "DynaFlex 9250",
+    "mando": "Doble",
+    "tipoSeccion": "10961",
+    "largo": "35 ft",
+    "varilla": "22mm",
+    "cambio22": "no",
+    "refSup": "no",
+    "refInf": "si"
+  },
+  {
+    "marca": "Schumacher",
+    "modelo": "DynaFlex 9250",
+    "mando": "Doble",
+    "tipoSeccion": "10961",
+    "largo": "40 ft",
+    "varilla": "22mm",
+    "cambio22": "no",
+    "refSup": "no",
+    "refInf": "si"
+  },
+  {
+    "marca": "Schumacher",
+    "modelo": "DynaFlex 9250",
+    "mando": "Doble",
+    "tipoSeccion": "10961",
+    "largo": "45 ft",
+    "varilla": "22mm",
+    "cambio22": "no",
+    "refSup": "no",
+    "refInf": "si"
+  }
+];
+    </script>
+</body>
+</html>
